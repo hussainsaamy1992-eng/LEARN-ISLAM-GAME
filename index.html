@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="dv" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LEARN ISLAM - ކުޑަކުދިންގެ އިސްލާމީ ގޭމް</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Three.js and GLTFLoader -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+
+  <!-- UI Overlay -->
+  <div id="ui-overlay">
+    <div class="top-bar interactive">
+      <div class="game-title">LEARN ISLAM - އިސްލާމް ދަސްކުރަމާ</div>
+      <div class="stats">
+        <span id="player-display">ވަނުން: މެހެމާން</span>
+        <span id="timer-display">ވަގުތު: 00:00</span>
+      </div>
+    </div>
+
+    <div class="controls-hint">
+      ހިނގުމަށް: ކީބޯޑު އެރޯ ކީތައް (W, A, S, D ނުވަތަ Arrow Keys) ބޭނުންކުރައްވާ
+    </div>
+  </div>
+
+  <!-- Login Modal -->
+  <div id="login-modal" class="modal-card">
+    <h2>އިސްލާމީ ގޭމަށް މަރުޙަބާ</h2>
+    <input type="text" id="username" placeholder="ޔޫޒަރނޭމް ޖައްސަވާ">
+    <input type="password" id="password" placeholder="ޕާސްވޯޑް ޖައްސަވާ">
+    <button id="login-btn">ވަންނަވާ</button>
+    <button id="guest-btn" style="background:#757575;">މެހެމާނެއްގެ ގޮތުގައި ފައްޓަވާ</button>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------
+    // 1. CONFIGURATION
+    // -------------------------------------------------------------
+    // Paste your deployed Google Apps Script Web App URL below:
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzEBcmkLOcdzXpJArO8_0ifdY_iGIAQGS4I2zDaM11S9xHwQvcU_GHxibo6a4r_E9G6/exec";
+
+    let currentUser = null;
+    let secondsElapsed = 0;
+    setInterval(() => {
+      secondsElapsed++;
+      const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
+      const secs = String(secondsElapsed % 60).padStart(2, '0');
+      document.getElementById('timer-display').innerText = `ވަގުތު: ${mins}:${secs}`;
+    }, 1000);
+
+    // -------------------------------------------------------------
+    // 2. THREE.JS SCENE SETUP
+    // -------------------------------------------------------------
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xa0e0ff);
+    scene.fog = new THREE.Fog(0xa0e0ff, 15, 60);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    // Lighting
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x448844, 0.7);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(20, 40, 20);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    // -------------------------------------------------------------
+    // 3. LOAD 3D ASSETS (garden.glb & kid.glb)
+    // -------------------------------------------------------------
+    const loader = new THREE.GLTFLoader();
+    let kidModel = null;
+    let mixer = null;
+    let walkAction = null;
+    let idleAction = null;
+
+    // Load Garden / Grass
+    loader.load('garden.glb', (gltf) => {
+      const garden = gltf.scene;
+      garden.traverse((node) => {
+        if (node.isMesh) node.receiveShadow = true;
+      });
+      scene.add(garden);
+    }, undefined, (err) => {
+      console.warn("Could not find garden.glb, creating procedural grass terrain.");
+      const groundGeo = new THREE.PlaneGeometry(100, 100);
+      const groundMat = new THREE.MeshLambertMaterial({ color: 0x5fa83b });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+    });
+
+    // Load Kid Character
+    loader.load('kid.glb', (gltf) => {
+      kidModel = gltf.scene;
+      kidModel.scale.set(1, 1, 1);
+      kidModel.position.set(0, 0, 0);
+
+      kidModel.traverse((node) => {
+        if (node.isMesh) node.castShadow = true;
+      });
+
+      // Handle skeletal walking animations if available inside the model
+      if (gltf.animations && gltf.animations.length > 0) {
+        mixer = new THREE.AnimationMixer(kidModel);
+        // Play first animation by default
+        walkAction = mixer.clipAction(gltf.animations[0]);
+      }
+
+      scene.add(kidModel);
+    });
+
+    // -------------------------------------------------------------
+    // 4. CHARACTER MOVEMENT & CONTROLS
+    // -------------------------------------------------------------
+    const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+    window.addEventListener('keydown', (e) => {
+      if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+    });
+
+    const moveSpeed = 0.12;
+    const rotateSpeed = 0.05;
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      if (mixer) mixer.update(delta);
+
+      if (kidModel) {
+        let isMoving = false;
+
+        // Rotation
+        if (keys.a || keys.ArrowLeft) {
+          kidModel.rotation.y += rotateSpeed;
+        }
+        if (keys.d || keys.ArrowRight) {
+          kidModel.rotation.y -= rotateSpeed;
+        }
+
+        // Forward / Backward
+        if (keys.w || keys.ArrowUp) {
+          kidModel.translateZ(moveSpeed);
+          isMoving = true;
+        }
+        if (keys.s || keys.ArrowDown) {
+          kidModel.translateZ(-moveSpeed);
+          isMoving = true;
+        }
+
+        // Play or stop walk animation
+        if (walkAction) {
+          if (isMoving && !walkAction.isRunning()) {
+            walkAction.play();
+          } else if (!isMoving && walkAction.isRunning()) {
+            walkAction.stop();
+          }
+        }
+
+        // Smooth 3rd-Person Camera following the kid
+        const relativeCameraOffset = new THREE.Vector3(0, 4, -7);
+        const cameraOffset = relativeCameraOffset.applyMatrix4(kidModel.matrixWorld);
+        camera.position.lerp(cameraOffset, 0.1);
+        camera.lookAt(kidModel.position.x, kidModel.position.y + 1.2, kidModel.position.z);
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // -------------------------------------------------------------
+    // 5. USER LOGIN & APPS SCRIPT INTEGRATION
+    // -------------------------------------------------------------
+    document.getElementById('guest-btn').addEventListener('click', () => {
+      document.getElementById('login-modal').classList.add('hidden');
+    });
+
+    document.getElementById('login-btn').addEventListener('click', async () => {
+      const user = document.getElementById('username').value;
+      const pass = document.getElementById('password').value;
+
+      if (!user || !pass) {
+        alert("ޔޫޒަރނޭމް އަދި ޕާސްވޯޑް ޖައްސަވާ!");
+        return;
+      }
+
+      try {
+        const res = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'login', username: user, password: pass })
+        });
+        const data = await res.json();
+        if (data.success) {
+          currentUser = data.user;
+          document.getElementById('player-display').innerText = `ވަނުން: ${data.user.username} (${data.user.school})`;
+          document.getElementById('login-modal').classList.add('hidden');
+        } else {
+          alert(data.message || "ވަނުމުގައި މައްސަލައެއް ދިމާވެއްޖެ");
+        }
+      } catch (err) {
+        // Allow guest play if script endpoint is not yet connected
+        document.getElementById('login-modal').classList.add('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
