@@ -18,13 +18,20 @@
     <div class="top-bar interactive">
       <div class="game-title">LEARN ISLAM - އިސްލާމް ދަސްކުރަމާ</div>
       <div class="stats">
+        <span id="zone-display">ބައި: 1</span>
         <span id="player-display">ވަނުން: މެހެމާން</span>
         <span id="timer-display">ވަގުތު: 00:00</span>
       </div>
     </div>
 
+    <!-- Question Floating HUD -->
+    <div id="question-hud" class="interactive">
+      <div id="question-title">ސުވާލު</div>
+      <div id="question-body">ލޯޑުވަނީ...</div>
+    </div>
+
     <div class="controls-hint">
-      ދުއްވުމަށް: (W, A, S, D) | ކެމެރާ 360° ބެލުމަށް: މައުސް ޑްރެގް ކުރައްވާ
+      ދުއްވުމަށް: (W, A, S, D) | ކެމެރާ 360° ބެލުމަށް: މައުސް ޑްރެގް ކުރައްވާ | ޖަވާބު ދިނުމަށް: ބޯޑު ކައިރިއަށް ދުރުވާ
     </div>
   </div>
 
@@ -39,7 +46,7 @@
 
   <script>
     // -------------------------------------------------------------
-    // 1. CONFIGURATION & TIMER
+    // 1. CONFIGURATION & STATE
     // -------------------------------------------------------------
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzEBcmkLOcdzXpJArO8_0ifdY_iGIAQGS4I2zDaM11S9xHwQvcU_GHxibo6a4r_E9G6/exec";
 
@@ -52,15 +59,39 @@
       document.getElementById('timer-display').innerText = `ވަގުތު: ${mins}:${secs}`;
     }, 1000);
 
+    let gameZones = [];
+    let currentZoneIdx = 0;
+    let currentQuestionIdx = 0;
+    let activeBoards = [];
+    let doors = [];
+
+    // Fallback data in case the Google Sheet is loading or offline
+    const fallbackZones = [
+      {
+        zoneIndex: 0,
+        questions: [
+          { question: "ކީރިތި ޤުރުއާނުގައި ވާ އެންމެ ދިގު ސޫރަތަކީ ކޮބައި؟", answer: "ސޫރަތުލް ބަޤަރާ" },
+          { question: "އިސްލާމްދީނުގެ ފުރަތަމަ ރުކުނަކީ ކޮބައި؟", answer: "ޝަހާދަތް ދިނުން" }
+        ]
+      },
+      {
+        zoneIndex: 1,
+        questions: [
+          { question: "ކީރިތި ރަސޫލާ އުފަންވެވަޑައިގަތީ ކޮން ރަށަކަށް؟", answer: "މައްކާ" },
+          { question: "އިސްލާމްދީނުގައި ފަރުޟު ކުރެއްވި ނަމާދުތަކުގެ އަދަދަކީ ކޮބައި؟", answer: "5 ނަމާދު" }
+        ]
+      }
+    ];
+
     // -------------------------------------------------------------
-    // 2. HIGH-PERFORMANCE 60 FPS RENDERER & SCENE SETUP
+    // 2. SCENE, SKY & LIGHTING
     // -------------------------------------------------------------
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x82cbef);
-    scene.fog = new THREE.FogExp2(0x82cbef, 0.006);
+    scene.fog = new THREE.FogExp2(0x82cbef, 0.005);
 
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 800);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -69,33 +100,30 @@
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(renderer.domElement);
 
-    // Optimized Lighting
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3d7026, 0.85);
     scene.add(hemiLight);
 
     const sunLight = new THREE.DirectionalLight(0xfffaed, 1.3);
-    sunLight.position.set(30, 50, 20);
+    sunLight.position.set(40, 70, 30);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 1024;
     sunLight.shadow.mapSize.height = 1024;
     sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = 100;
-    sunLight.shadow.camera.left = -20;
-    sunLight.shadow.camera.right = 20;
-    sunLight.shadow.camera.top = 20;
-    sunLight.shadow.camera.bottom = -20;
-    sunLight.shadow.bias = -0.0005;
+    sunLight.shadow.camera.far = 120;
+    sunLight.shadow.camera.left = -30;
+    sunLight.shadow.camera.right = 30;
+    sunLight.shadow.camera.top = 30;
+    sunLight.shadow.camera.bottom = -30;
     scene.add(sunLight);
 
     // -------------------------------------------------------------
-    // 3. FAST REALISTIC GRASS TERRAIN
+    // 3. EXPANSIVE REALISTIC GRASS TERRAIN
     // -------------------------------------------------------------
     function createOptimizedGrassTexture() {
       const c = document.createElement('canvas');
       c.width = 512;
       c.height = 512;
       const ctx = c.getContext('2d');
-
       ctx.fillStyle = '#325e22';
       ctx.fillRect(0, 0, 512, 512);
 
@@ -116,9 +144,9 @@
     const grassTex = createOptimizedGrassTexture();
     grassTex.wrapS = THREE.RepeatWrapping;
     grassTex.wrapT = THREE.RepeatWrapping;
-    grassTex.repeat.set(60, 60);
+    grassTex.repeat.set(120, 120);
 
-    const groundGeo = new THREE.PlaneGeometry(600, 600);
+    const groundGeo = new THREE.PlaneGeometry(1200, 1200);
     const groundMat = new THREE.MeshLambertMaterial({ map: grassTex });
     const fullGround = new THREE.Mesh(groundGeo, groundMat);
     fullGround.rotation.x = -Math.PI / 2;
@@ -127,139 +155,323 @@
     scene.add(fullGround);
 
     // -------------------------------------------------------------
-    // 4. LOAD ASSETS (KID, GARDEN & SKATEBOARD)
+    // 4. LOAD ASSETS (KID, SKATEBOARD, GARDEN, FENCE, DOOR)
     // -------------------------------------------------------------
     const loader = new THREE.GLTFLoader();
-    
-    // Player Rig Root
     const playerRoot = new THREE.Group();
     scene.add(playerRoot);
-    
+
     let kidInner = null;
     let skateboardMesh = null;
     let mixer = null;
     let walkAction = null;
     let hasBuiltinAnim = false;
-    let boardDeckHeight = 0.22; // Height of skateboard deck above ground
     let baseFootOffset = 0;
+    const boardDeckHeight = 0.22;
 
-    // Load Garden Props
-    loader.load('garden.glb', (gltf) => {
-      const gardenOrigin = gltf.scene;
-      gardenOrigin.traverse((n) => { 
-        if (n.isMesh) n.receiveShadow = true;
-      });
+    let fenceModel = null;
+    let doorModel = null;
+    let assetsLoadedCount = 0;
 
-      const clumpLocations = [
-        { x: 4, z: 5, s: 3.5 },
-        { x: -10, z: 12, s: 3.0 },
-        { x: 15, z: -10, s: 3.8 },
-        { x: -18, z: -16, s: 4.0 },
-        { x: 22, z: 20, s: 3.2 },
-        { x: -25, z: 8, s: 3.5 },
-        { x: 10, z: -22, s: 3.6 },
-        { x: -14, z: 26, s: 3.4 }
-      ];
-
-      clumpLocations.forEach((loc) => {
-        const clump = gardenOrigin.clone();
-        clump.scale.set(loc.s, loc.s, loc.s);
-        clump.position.set(loc.x, 0, loc.z);
-        scene.add(clump);
-      });
-    }, undefined, (e) => {
-      console.log("Using procedural grass ground.");
-    });
+    function checkReadyToBuildZones() {
+      assetsLoadedCount++;
+      if (assetsLoadedCount >= 2) {
+        initGameZones();
+      }
+    }
 
     // Load Skateboard
     loader.load('skateboard.glb', (gltf) => {
       skateboardMesh = gltf.scene;
       skateboardMesh.updateMatrixWorld(true);
-
       const sBox = new THREE.Box3().setFromObject(skateboardMesh);
       const sSize = new THREE.Vector3();
       sBox.getSize(sSize);
-
-      // Scale skateboard proportionately to the kid
       const targetLength = 1.35;
       const sScale = targetLength / (Math.max(sSize.x, sSize.z) || 1);
       skateboardMesh.scale.set(sScale, sScale, sScale);
-
-      // Re-measure after scaling
       skateboardMesh.updateMatrixWorld(true);
       const scaledBox = new THREE.Box3().setFromObject(skateboardMesh);
-      
-      // Place wheels flat on the grass surface
       skateboardMesh.position.y = -scaledBox.min.y;
-      boardDeckHeight = (scaledBox.max.y - scaledBox.min.y) * 0.85;
-
-      skateboardMesh.traverse((node) => {
-        if (node.isMesh) {
-          node.castShadow = true;
-          node.receiveShadow = true;
-        }
-      });
-
+      skateboardMesh.traverse(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
       playerRoot.add(skateboardMesh);
-
-      // If kid is already loaded, elevate her feet onto the deck
-      if (kidInner) {
-        kidInner.position.y = baseFootOffset + boardDeckHeight;
-      }
-    }, undefined, (err) => {
-      console.warn("skateboard.glb not found or still loading.");
-    });
+      if (kidInner) kidInner.position.y = baseFootOffset + boardDeckHeight;
+    }, undefined, () => console.warn("Using procedural skateboard stance"));
 
     // Load Kid Character
     loader.load('kid.glb', (gltf) => {
       kidInner = gltf.scene;
       kidInner.updateMatrixWorld(true);
-
       let box = new THREE.Box3().setFromObject(kidInner);
       let origHeight = box.max.y - box.min.y;
-
       const targetHeight = 2.2;
       const scaleFactor = targetHeight / (origHeight || 1);
       kidInner.scale.set(scaleFactor, scaleFactor, scaleFactor);
-
       kidInner.updateMatrixWorld(true);
       box = new THREE.Box3().setFromObject(kidInner);
-
       baseFootOffset = -box.min.y;
-      // Position her feet directly on top of the skateboard deck
       kidInner.position.y = baseFootOffset + boardDeckHeight;
-
-      // Rotate kid slightly sideways (skater riding stance)
       kidInner.rotation.y = 0.25;
 
-      kidInner.traverse((node) => {
-        if (node.isMesh) {
-          node.castShadow = true;
-          node.receiveShadow = true;
-        }
-      });
-
+      kidInner.traverse(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
       playerRoot.add(kidInner);
 
       if (gltf.animations && gltf.animations.length > 0) {
         mixer = new THREE.AnimationMixer(kidInner);
-        const clip = gltf.animations.find(a => 
-          a.name.toLowerCase().includes('walk') || 
-          a.name.toLowerCase().includes('run')
-        ) || gltf.animations[0];
-
+        const clip = gltf.animations.find(a => a.name.toLowerCase().includes('walk') || a.name.toLowerCase().includes('run')) || gltf.animations[0];
         walkAction = mixer.clipAction(clip);
         hasBuiltinAnim = true;
       }
     });
 
+    // Load Garden / Bushes
+    loader.load('garden.glb', (gltf) => {
+      const g = gltf.scene;
+      g.traverse(n => { if (n.isMesh) n.receiveShadow = true; });
+      for (let i = 0; i < 20; i++) {
+        const clump = g.clone();
+        clump.position.set((Math.random() - 0.5) * 160, 0, (Math.random() - 0.5) * 250);
+        clump.scale.set(3, 3, 3);
+        scene.add(clump);
+      }
+    }, undefined, () => {});
+
+    // Load Fence Model
+    loader.load('fence.glb', (gltf) => {
+      fenceModel = gltf.scene;
+      fenceModel.traverse(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
+      checkReadyToBuildZones();
+    }, undefined, () => {
+      // Procedural fallback fence
+      fenceModel = createFallbackFence();
+      checkReadyToBuildZones();
+    });
+
+    // Load Door Model
+    loader.load('door.glb', (gltf) => {
+      doorModel = gltf.scene;
+      doorModel.traverse(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
+      checkReadyToBuildZones();
+    }, undefined, () => {
+      // Procedural fallback door
+      doorModel = createFallbackDoor();
+      checkReadyToBuildZones();
+    });
+
+    function createFallbackFence() {
+      const group = new THREE.Group();
+      const woodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.8, 0.3), woodMat);
+      post.position.y = 0.9;
+      const rail1 = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.15, 0.1), woodMat);
+      rail1.position.set(1.5, 1.3, 0);
+      const rail2 = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.15, 0.1), woodMat);
+      rail2.position.set(1.5, 0.6, 0);
+      group.add(post, rail1, rail2);
+      return group;
+    }
+
+    function createFallbackDoor() {
+      const group = new THREE.Group();
+      const doorMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2, 3.5, 0.25),
+        new THREE.MeshLambertMaterial({ color: 0xc4823f })
+      );
+      doorMesh.position.y = 1.75;
+      doorMesh.castShadow = true;
+      group.add(doorMesh);
+      return group;
+    }
+
     // -------------------------------------------------------------
-    // 5. 360° MOUSE & TOUCHPAD CAMERA CONTROLS
+    // 5. ZONE & FENCE BUILDER (ZONE BY ZONE CORRIDOR)
+    // -------------------------------------------------------------
+    const zoneLength = 40;  // Length of each zone along the Z-axis
+    const zoneWidth = 26;   // Width between side fences
+
+    function initGameZones() {
+      const zonesToUse = (gameZones.length > 0) ? gameZones : fallbackZones;
+
+      zonesToUse.forEach((zone, idx) => {
+        const startZ = idx * zoneLength;
+        const endZ = (idx + 1) * zoneLength;
+
+        // Build left and right fence boundaries
+        for (let z = startZ; z < endZ; z += 3.2) {
+          const leftFence = fenceModel.clone();
+          leftFence.position.set(-zoneWidth / 2, 0, z);
+          leftFence.rotation.y = Math.PI / 2;
+          scene.add(leftFence);
+
+          const rightFence = fenceModel.clone();
+          rightFence.position.set(zoneWidth / 2, 0, z);
+          rightFence.rotation.y = -Math.PI / 2;
+          scene.add(rightFence);
+        }
+
+        // Build dividing partition fence and door at the end of the zone
+        for (let x = -zoneWidth / 2; x <= zoneWidth / 2; x += 3.2) {
+          if (Math.abs(x) > 2.5) { // Leave center opening for door
+            const endFence = fenceModel.clone();
+            endFence.position.set(x, 0, endZ);
+            scene.add(endFence);
+          }
+        }
+
+        // Place the gateway door at the end opening
+        const doorPivot = new THREE.Group();
+        doorPivot.position.set(0, 0, endZ);
+        const doorMesh = doorModel.clone();
+        doorMesh.position.set(0, 0, 0);
+        doorPivot.add(doorMesh);
+        scene.add(doorPivot);
+
+        doors.push({
+          zoneIndex: idx,
+          pivot: doorPivot,
+          isOpen: false
+        });
+      });
+
+      setupCurrentZoneQuestion();
+    }
+
+    // -------------------------------------------------------------
+    // 6. THAANA SIGNBOARD ON WOODEN STICK CREATOR
+    // -------------------------------------------------------------
+    function createAnswerSignboard(answerText, isCorrect, position) {
+      const signGroup = new THREE.Group();
+      signGroup.position.copy(position);
+
+      // Wooden Stick / Post
+      const stickMat = new THREE.MeshLambertMaterial({ color: 0x5c3a21 });
+      const stickGeo = new THREE.CylinderGeometry(0.12, 0.14, 2.8, 12);
+      const stick = new THREE.Mesh(stickGeo, stickMat);
+      stick.position.y = 1.4;
+      stick.castShadow = true;
+      signGroup.add(stick);
+
+      // Canvas Texture with Thaana Script RTL Rendering
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+
+      // Signboard background
+      ctx.fillStyle = '#fffaea';
+      ctx.roundRect ? ctx.roundRect(10, 10, 492, 236, 30) : ctx.fillRect(10, 10, 492, 236);
+      ctx.fill();
+
+      // Border
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = '#2e7d32';
+      ctx.stroke();
+
+      // Text Render
+      ctx.font = 'bold 36px "Noto Sans Thaana", "MV Faseyha", sans-serif';
+      ctx.fillStyle = '#1b3014';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.direction = 'rtl';
+
+      // Simple word wrapping
+      const words = answerText.split(' ');
+      let line = '';
+      let y = 128;
+      if (words.length > 4) {
+        y = 100;
+        ctx.fillText(words.slice(0, Math.ceil(words.length / 2)).join(' '), 256, y);
+        ctx.fillText(words.slice(Math.ceil(words.length / 2)).join(' '), 256, y + 50);
+      } else {
+        ctx.fillText(answerText, 256, y);
+      }
+
+      const boardTexture = new THREE.CanvasTexture(canvas);
+      const boardMat = new THREE.MeshLambertMaterial({ map: boardTexture });
+      const boardGeo = new THREE.BoxGeometry(3.6, 1.8, 0.15);
+      const board = new THREE.Mesh(boardGeo, boardMat);
+      board.position.y = 2.4;
+      board.castShadow = true;
+      signGroup.add(board);
+
+      scene.add(signGroup);
+
+      return {
+        group: signGroup,
+        isCorrect: isCorrect,
+        text: answerText,
+        position: position
+      };
+    }
+
+    // -------------------------------------------------------------
+    // 7. QUESTION CYCLE & ZONE PROGRESSION
+    // -------------------------------------------------------------
+    function setupCurrentZoneQuestion() {
+      // Clear previous signboards
+      activeBoards.forEach(b => scene.remove(b.group));
+      activeBoards = [];
+
+      const currentZones = (gameZones.length > 0) ? gameZones : fallbackZones;
+      if (currentZoneIdx >= currentZones.length) {
+        document.getElementById('question-title').innerText = "ޝުކުރިއްޔާ!";
+        document.getElementById('question-body').innerText = "ހުރިހާ ބައެއް ކާމިޔާބުކަމާއެކު ނިންމައިފި!";
+        return;
+      }
+
+      const zone = currentZones[currentZoneIdx];
+      const qData = zone.questions[currentQuestionIdx];
+
+      // Update Floating Question HUD
+      document.getElementById('zone-display').innerText = `ބައި: ${currentZoneIdx + 1} (${currentQuestionIdx + 1}/${zone.questions.length})`;
+      document.getElementById('question-title').innerText = `ބައި ${currentZoneIdx + 1} ގެ ސުވާލު ${currentQuestionIdx + 1}:`;
+      document.getElementById('question-body').innerText = qData.question;
+
+      // Extract wrong choices from other questions to populate multiple boards
+      const allAnswers = [];
+      zone.questions.forEach(q => allAnswers.push(q.answer));
+      const distractorAnswers = allAnswers.filter(a => a !== qData.answer);
+      const wrongAnswer1 = distractorAnswers[0] || "ރަނގަޅެއް ނޫން";
+      const wrongAnswer2 = distractorAnswers[1] || "އަނެއްކާ ބައްލަވާ";
+
+      const choices = [
+        { text: qData.answer, isCorrect: true },
+        { text: wrongAnswer1, isCorrect: false },
+        { text: wrongAnswer2, isCorrect: false }
+      ].sort(() => Math.random() - 0.5);
+
+      // Position boards across the zone width
+      const baseZ = currentZoneIdx * zoneLength + 18;
+      const xPositions = [-7, 0, 7];
+
+      choices.forEach((choice, i) => {
+        const board = createAnswerSignboard(
+          choice.text,
+          choice.isCorrect,
+          new THREE.Vector3(xPositions[i], 0, baseZ)
+        );
+        activeBoards.push(board);
+      });
+    }
+
+    function openZoneDoor(zoneIdx) {
+      const doorObj = doors.find(d => d.zoneIndex === zoneIdx);
+      if (doorObj && !doorObj.isOpen) {
+        doorObj.isOpen = true;
+        let angle = 0;
+        const openInterval = setInterval(() => {
+          angle += 0.05;
+          doorObj.pivot.rotation.y = angle;
+          if (angle >= Math.PI / 2) clearInterval(openInterval);
+        }, 16);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 8. 360° ORBIT CAMERA CONTROLS
     // -------------------------------------------------------------
     let isDragging = false;
-    let prevMouseX = 0;
-    let prevMouseY = 0;
-
+    let prevMouseX = 0, prevMouseY = 0;
     let cameraAngleH = 0;
     let cameraAngleV = 0.32;
     let cameraDistance = 6.8;
@@ -313,24 +525,16 @@
     });
 
     // -------------------------------------------------------------
-    // 6. SKATEBOARD MOVEMENT & CARVING DYNAMICS
+    // 9. INPUT, SKATEBOARD DYNAMICS & GAME LOOP
     // -------------------------------------------------------------
-    const keys = {
-      w: false, a: false, s: false, d: false,
-      ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
-    };
-
-    window.addEventListener('keydown', (e) => {
-      if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
-    });
-
-    window.addEventListener('keyup', (e) => {
-      if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
-    });
+    const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+    window.addEventListener('keydown', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+    window.addEventListener('keyup', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = false; });
 
     const clock = new THREE.Clock();
-    const skateSpeed = 8.5; // Fast, smooth skateboard glide
+    const skateSpeed = 8.5;
     let currentTilt = 0;
+    let answerCooldown = false;
 
     function animate() {
       requestAnimationFrame(animate);
@@ -339,9 +543,7 @@
       if (mixer) mixer.update(delta);
 
       if (playerRoot && kidInner) {
-        let moveX = 0;
-        let moveZ = 0;
-
+        let moveX = 0, moveZ = 0;
         if (keys.w || keys.ArrowUp) moveZ += 1;
         if (keys.s || keys.ArrowDown) moveZ -= 1;
         if (keys.a || keys.ArrowLeft) moveX += 1;
@@ -359,26 +561,76 @@
           if (diff > Math.PI) diff -= Math.PI * 2;
           playerRoot.rotation.y += diff * 0.16;
 
-          // Skate carving banking angle
           const targetTilt = -diff * 0.35;
           currentTilt = THREE.MathUtils.lerp(currentTilt, targetTilt, 0.12);
 
-          playerRoot.position.x += Math.sin(targetRotation) * skateSpeed * delta;
-          playerRoot.position.z += Math.cos(targetRotation) * skateSpeed * delta;
+          const nextX = playerRoot.position.x + Math.sin(targetRotation) * skateSpeed * delta;
+          const nextZ = playerRoot.position.z + Math.cos(targetRotation) * skateSpeed * delta;
+
+          // Side fence boundary collision
+          if (Math.abs(nextX) < (zoneWidth / 2 - 1.5)) {
+            playerRoot.position.x = nextX;
+          }
+
+          // Door collision check
+          const currentEndDoorZ = (currentZoneIdx + 1) * zoneLength;
+          const currentDoor = doors.find(d => d.zoneIndex === currentZoneIdx);
+
+          if (currentDoor && !currentDoor.isOpen && nextZ >= (currentEndDoorZ - 1.5)) {
+            // Door is locked until all questions in the zone are finished
+          } else {
+            playerRoot.position.z = nextZ;
+          }
         } else {
           currentTilt = THREE.MathUtils.lerp(currentTilt, 0, 0.15);
         }
 
-        // Apply carving bank angle to board & rider
-        if (skateboardMesh) {
-          skateboardMesh.rotation.z = currentTilt;
-        }
+        if (skateboardMesh) skateboardMesh.rotation.z = currentTilt;
         kidInner.rotation.z = currentTilt * 0.8;
-
-        // Keep player root anchored to ground level
         playerRoot.position.y = 0;
 
-        // 360° Orbit Camera follow
+        // Proximity detection for answer signboards
+        if (!answerCooldown && activeBoards.length > 0) {
+          activeBoards.forEach(board => {
+            const dist = playerRoot.position.distanceTo(board.position);
+            if (dist < 2.5) {
+              answerCooldown = true;
+              if (board.isCorrect) {
+                // Correct answer selected
+                document.getElementById('question-hud').style.background = '#c8e6c9';
+                document.getElementById('question-body').innerText = `ސާބަސް! ޖަވާބު ރަނގަޅު: ${board.text}`;
+
+                setTimeout(() => {
+                  document.getElementById('question-hud').style.background = 'rgba(255, 255, 255, 0.95)';
+                  const currentZones = (gameZones.length > 0) ? gameZones : fallbackZones;
+                  currentQuestionIdx++;
+
+                  if (currentQuestionIdx >= currentZones[currentZoneIdx].questions.length) {
+                    // All questions in this zone completed: open the gateway door!
+                    openZoneDoor(currentZoneIdx);
+                    document.getElementById('question-body').innerText = "މަރުޙަބާ! ދޮރު ހުޅުވިއްޖެ، އަނެއް ބަޔަށް ވަޑައިގަންނަވާ!";
+                    currentZoneIdx++;
+                    currentQuestionIdx = 0;
+                  } else {
+                    setupCurrentZoneQuestion();
+                  }
+                  answerCooldown = false;
+                }, 1800);
+              } else {
+                // Incorrect answer selected
+                document.getElementById('question-hud').style.background = '#ffcdd2';
+                document.getElementById('question-body').innerText = "ނުބައި! އަނެއްކާ މަސައްކަތް ކޮށްލައްވާ!";
+                setTimeout(() => {
+                  document.getElementById('question-hud').style.background = 'rgba(255, 255, 255, 0.95)';
+                  setupCurrentZoneQuestion();
+                  answerCooldown = false;
+                }, 1500);
+              }
+            }
+          });
+        }
+
+        // Camera follow
         const camX = playerRoot.position.x - Math.sin(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
         const camY = playerRoot.position.y + Math.sin(cameraAngleV) * cameraDistance + 1.25;
         const camZ = playerRoot.position.z - Math.cos(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
@@ -386,12 +638,7 @@
         camera.position.set(camX, camY, camZ);
         camera.lookAt(playerRoot.position.x, playerRoot.position.y + 1.25, playerRoot.position.z);
 
-        // Sunlight tracks player
-        sunLight.position.set(
-          playerRoot.position.x + 30,
-          50,
-          playerRoot.position.z + 20
-        );
+        sunLight.position.set(playerRoot.position.x + 30, 60, playerRoot.position.z + 20);
         sunLight.target = playerRoot;
       }
 
@@ -407,8 +654,22 @@
     });
 
     // -------------------------------------------------------------
-    // 7. LOGIN / AUTHENTICATION MODAL
+    // 10. FETCH LIVE QUESTIONS & LOGIN API
     // -------------------------------------------------------------
+    async function loadQuestionsFromSheet() {
+      try {
+        const res = await fetch(`${SCRIPT_URL}?action=getQuestions`);
+        const data = await res.json();
+        if (data.status === "success" && data.zones.length > 0) {
+          gameZones = data.zones;
+          setupCurrentZoneQuestion();
+        }
+      } catch (e) {
+        console.warn("Could not load Google Sheet questions, using offline fallback questions.");
+      }
+    }
+    loadQuestionsFromSheet();
+
     document.getElementById('guest-btn').addEventListener('click', () => {
       document.getElementById('login-modal').classList.add('hidden');
     });
