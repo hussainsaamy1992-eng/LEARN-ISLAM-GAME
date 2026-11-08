@@ -24,7 +24,7 @@
     </div>
 
     <div class="controls-hint">
-      ހިނގުމަށް: ކީބޯޑު އެރޯ ކީތައް (W, A, S, D ނުވަތަ Arrow Keys) ބޭނުންކުރައްވާ
+      ހިނގުމަށް: (W, A, S, D) | ކެމެރާ 360° ބެލުމަށް: މައުސް ޑްރެގް ކުރައްވާ
     </div>
   </div>
 
@@ -78,60 +78,45 @@
     sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.camera.near = 0.5;
     sunLight.shadow.camera.far = 150;
-    sunLight.shadow.camera.left = -25;
-    sunLight.shadow.camera.right = 25;
-    sunLight.shadow.camera.top = 25;
-    sunLight.shadow.camera.bottom = -25;
+    sunLight.shadow.camera.left = -30;
+    sunLight.shadow.camera.right = 30;
+    sunLight.shadow.camera.top = 30;
+    sunLight.shadow.camera.bottom = -30;
     scene.add(sunLight);
 
-    // -------------------------------------------------------------
-    // 3. PROCEDURAL REALISTIC GRASS TEXTURE & VAST GROUND
-    // -------------------------------------------------------------
-    function createGrassCanvas() {
+    // Base Soil / Turf Bedding
+    function createSoilCanvas() {
       const c = document.createElement('canvas');
-      c.width = 512;
-      c.height = 512;
+      c.width = 256;
+      c.height = 256;
       const ctx = c.getContext('2d');
-
-      // Base soil/dark green
-      ctx.fillStyle = '#396b27';
-      ctx.fillRect(0, 0, 512, 512);
-
-      // Procedural grass blade noise
-      for (let i = 0; i < 40000; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const len = 3 + Math.random() * 8;
-        const greens = ['#49852f', '#5ca33a', '#6dbd45', '#336122', '#7ecb4f'];
-        ctx.strokeStyle = greens[Math.floor(Math.random() * greens.length)];
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + (Math.random() - 0.5) * 4, y - len);
-        ctx.stroke();
+      ctx.fillStyle = '#2f521f';
+      ctx.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 15000; i++) {
+        ctx.fillStyle = ['#385f26', '#264219', '#467231'][Math.floor(Math.random() * 3)];
+        ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
       }
       return new THREE.CanvasTexture(c);
     }
 
-    const grassTex = createGrassCanvas();
-    grassTex.wrapS = THREE.RepeatWrapping;
-    grassTex.wrapT = THREE.RepeatWrapping;
-    grassTex.repeat.set(80, 80);
+    const groundTex = createSoilCanvas();
+    groundTex.wrapS = THREE.RepeatWrapping;
+    groundTex.wrapT = THREE.RepeatWrapping;
+    groundTex.repeat.set(100, 100);
 
-    const groundGeo = new THREE.PlaneGeometry(800, 800);
-    const groundMat = new THREE.MeshLambertMaterial({ map: grassTex });
+    const groundGeo = new THREE.PlaneGeometry(1000, 1000);
+    const groundMat = new THREE.MeshLambertMaterial({ map: groundTex });
     const fullGround = new THREE.Mesh(groundGeo, groundMat);
     fullGround.rotation.x = -Math.PI / 2;
-    fullGround.position.y = 0;
+    fullGround.position.y = -0.05;
     fullGround.receiveShadow = true;
     scene.add(fullGround);
 
     // -------------------------------------------------------------
-    // 4. LOAD ASSETS (FIX WAIST SINKING ISSUE)
+    // 3. LOAD ASSETS & FULL-AREA GRASS DISTRIBUTION
     // -------------------------------------------------------------
     const loader = new THREE.GLTFLoader();
     
-    // Character root handles world positioning & rotation
     const playerRoot = new THREE.Group();
     scene.add(playerRoot);
     
@@ -141,51 +126,52 @@
     let hasBuiltinAnim = false;
     let baseFootOffset = 0;
 
-    // Load Garden Props & Scatter Several Clumps
+    // Load and carpet the area with garden clumps
     loader.load('garden.glb', (gltf) => {
       const gardenOrigin = gltf.scene;
-      gardenOrigin.traverse((n) => { if (n.isMesh) n.receiveShadow = true; });
-
-      // Place a few natural clumps around the landscape
-      const positions = [
-        { x: 0, z: 0, s: 4 },
-        { x: -18, z: 12, s: 3.5 },
-        { x: 22, z: -10, s: 3.8 },
-        { x: -12, z: -25, s: 4.2 },
-        { x: 20, z: 22, s: 3.2 }
-      ];
-
-      positions.forEach((p, idx) => {
-        const clump = (idx === 0) ? gardenOrigin : gardenOrigin.clone();
-        clump.scale.set(p.s, p.s, p.s);
-        clump.position.set(p.x, 0, p.z);
-        scene.add(clump);
+      gardenOrigin.traverse((n) => { 
+        if (n.isMesh) {
+          n.receiveShadow = true; 
+        }
       });
+
+      // Scatter grass clumps in a dense patterned field
+      const clumpSpacing = 7.5;
+      const range = 70; // creates a carpet covering 140x140 meters around origin
+
+      for (let x = -range; x <= range; x += clumpSpacing) {
+        for (let z = -range; z <= range; z += clumpSpacing) {
+          const clump = gardenOrigin.clone();
+          // Jitter position, scale, and rotation so it looks natural
+          const offsetX = x + (Math.random() - 0.5) * 3;
+          const offsetZ = z + (Math.random() - 0.5) * 3;
+          const scale = 3.6 + Math.random() * 1.4;
+
+          clump.position.set(offsetX, 0, offsetZ);
+          clump.rotation.y = Math.random() * Math.PI * 2;
+          clump.scale.set(scale, scale, scale);
+          scene.add(clump);
+        }
+      }
     }, undefined, (e) => {
-      console.log("No garden.glb found; relying on procedural grass terrain.");
+      console.log("Using procedural grass ground.");
     });
 
-    // Load Kid Character
+    // Load Kid Character & Align to Ground
     loader.load('kid.glb', (gltf) => {
       kidInner = gltf.scene;
-
-      // Ensure all transforms and matrices update before measuring
       kidInner.updateMatrixWorld(true);
 
-      // Measure original bounding box
       let box = new THREE.Box3().setFromObject(kidInner);
       let origHeight = box.max.y - box.min.y;
 
-      // Scale character to standard human child height (~2.2 units)
       const targetHeight = 2.2;
       const scaleFactor = targetHeight / (origHeight || 1);
       kidInner.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
-      // Recalculate bounding box with new scale
       kidInner.updateMatrixWorld(true);
       box = new THREE.Box3().setFromObject(kidInner);
 
-      // Force the lowest vertex of the feet to rest exactly at Y = 0
       baseFootOffset = -box.min.y;
       kidInner.position.y = baseFootOffset;
 
@@ -198,7 +184,6 @@
 
       playerRoot.add(kidInner);
 
-      // Check for built-in skeletal animations
       if (gltf.animations && gltf.animations.length > 0) {
         mixer = new THREE.AnimationMixer(kidInner);
         const clip = gltf.animations.find(a => 
@@ -212,7 +197,73 @@
     });
 
     // -------------------------------------------------------------
-    // 5. MOVEMENT, KEYBOARD CONTROLS & CAMERA
+    // 4. 360° MOUSE & TOUCHPAD ORBIT CAMERA ENGINE
+    // -------------------------------------------------------------
+    let isDragging = false;
+    let prevMouseX = 0;
+    let prevMouseY = 0;
+
+    // Camera spherical coordinates
+    let cameraAngleH = 0;     // Horizontal rotation (radians)
+    let cameraAngleV = 0.35;  // Vertical pitch (radians)
+    let cameraDistance = 7.0; // Distance behind player
+
+    window.addEventListener('mousedown', (e) => {
+      // Don't drag if interacting with UI modals
+      if (e.target.closest('#login-modal') || e.target.closest('.interactive')) return;
+      isDragging = true;
+      prevMouseX = e.clientX;
+      prevMouseY = e.clientY;
+    });
+
+    window.addEventListener('mouseup', () => { isDragging = false; });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const deltaX = e.clientX - prevMouseX;
+      const deltaY = e.clientY - prevMouseY;
+      prevMouseX = e.clientX;
+      prevMouseY = e.clientY;
+
+      // Rotate camera around girl
+      cameraAngleH -= deltaX * 0.006;
+      cameraAngleV += deltaY * 0.005;
+
+      // Limit vertical pitch so camera cannot flip upside down
+      cameraAngleV = Math.max(0.05, Math.min(Math.PI / 2.3, cameraAngleV));
+    });
+
+    // Touch controls for mobile / tablet trackpads
+    window.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1 && !e.target.closest('#login-modal')) {
+        isDragging = true;
+        prevMouseX = e.touches[0].clientX;
+        prevMouseY = e.touches[0].clientY;
+      }
+    });
+
+    window.addEventListener('touchend', () => { isDragging = false; });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!isDragging || e.touches.length !== 1) return;
+      const deltaX = e.touches[0].clientX - prevMouseX;
+      const deltaY = e.touches[0].clientY - prevMouseY;
+      prevMouseX = e.touches[0].clientX;
+      prevMouseY = e.touches[0].clientY;
+
+      cameraAngleH -= deltaX * 0.008;
+      cameraAngleV += deltaY * 0.006;
+      cameraAngleV = Math.max(0.05, Math.min(Math.PI / 2.3, cameraAngleV));
+    });
+
+    // Zoom in / out with mouse wheel
+    window.addEventListener('wheel', (e) => {
+      cameraDistance += e.deltaY * 0.005;
+      cameraDistance = Math.max(3.5, Math.min(14.0, cameraDistance));
+    });
+
+    // -------------------------------------------------------------
+    // 5. MOVEMENT CONTROLS & CAMERA-RELATIVE WALKING
     // -------------------------------------------------------------
     const keys = {
       w: false, a: false, s: false, d: false,
@@ -228,8 +279,7 @@
     });
 
     const clock = new THREE.Clock();
-    const moveSpeed = 5.5;   // walking units/sec
-    const turnSpeed = 3.2;   // radians/sec
+    const moveSpeed = 6.0;
     let walkStepTime = 0;
 
     function animate() {
@@ -239,30 +289,37 @@
       if (mixer) mixer.update(delta);
 
       if (playerRoot && kidInner) {
-        let isMoving = false;
+        // Calculate input movement direction relative to camera angle
+        let moveX = 0;
+        let moveZ = 0;
 
-        // Turning
-        if (keys.a || keys.ArrowLeft) {
-          playerRoot.rotation.y += turnSpeed * delta;
-        }
-        if (keys.d || keys.ArrowRight) {
-          playerRoot.rotation.y -= turnSpeed * delta;
+        if (keys.w || keys.ArrowUp) moveZ += 1;
+        if (keys.s || keys.ArrowDown) moveZ -= 1;
+        if (keys.a || keys.ArrowLeft) moveX += 1;
+        if (keys.d || keys.ArrowRight) moveX -= 1;
+
+        const isMoving = (moveX !== 0 || moveZ !== 0);
+
+        if (isMoving) {
+          // Compute angle of movement relative to camera
+          const inputAngle = Math.atan2(moveX, moveZ);
+          const targetRotation = cameraAngleH + inputAngle;
+
+          // Smoothly turn character toward walking direction
+          const currentRotation = playerRoot.rotation.y;
+          let diff = (targetRotation - currentRotation) % (Math.PI * 2);
+          if (diff < -Math.PI) diff += Math.PI * 2;
+          if (diff > Math.PI) diff -= Math.PI * 2;
+          playerRoot.rotation.y += diff * 0.15;
+
+          // Move forward in the direction of the movement vector
+          playerRoot.position.x += Math.sin(targetRotation) * moveSpeed * delta;
+          playerRoot.position.z += Math.cos(targetRotation) * moveSpeed * delta;
         }
 
-        // Forward / Backward
-        if (keys.w || keys.ArrowUp) {
-          playerRoot.translateZ(moveSpeed * delta);
-          isMoving = true;
-        }
-        if (keys.s || keys.ArrowDown) {
-          playerRoot.translateZ(-moveSpeed * 0.55 * delta);
-          isMoving = true;
-        }
-
-        // Keep player root anchored to ground plane
         playerRoot.position.y = 0;
 
-        // Walking Gait Dynamics
+        // Animations
         if (hasBuiltinAnim && walkAction) {
           if (isMoving) {
             if (!walkAction.isRunning()) walkAction.play();
@@ -270,7 +327,6 @@
             walkAction.stop();
           }
         } else if (!hasBuiltinAnim) {
-          // Realistic step bobbing that always returns to base foot level
           if (isMoving) {
             walkStepTime += delta * 11;
             kidInner.position.y = baseFootOffset + Math.abs(Math.sin(walkStepTime)) * 0.12;
@@ -281,18 +337,15 @@
           }
         }
 
-        // Smooth camera follow
-        const cameraOffset = new THREE.Vector3(0, 3.2, -6.0);
-        cameraOffset.applyMatrix4(playerRoot.matrixWorld);
-        camera.position.lerp(cameraOffset, 0.08);
+        // 360° Orbit Camera Position calculation
+        const camX = playerRoot.position.x - Math.sin(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
+        const camY = playerRoot.position.y + Math.sin(cameraAngleV) * cameraDistance + 1.2;
+        const camZ = playerRoot.position.z - Math.cos(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
 
-        camera.lookAt(
-          playerRoot.position.x,
-          playerRoot.position.y + 1.3,
-          playerRoot.position.z
-        );
+        camera.position.set(camX, camY, camZ);
+        camera.lookAt(playerRoot.position.x, playerRoot.position.y + 1.3, playerRoot.position.z);
 
-        // Position sunlight above player for clean shadow projection
+        // Keep sunlight and shadow area centered with character
         sunLight.position.set(
           playerRoot.position.x + 35,
           70,
