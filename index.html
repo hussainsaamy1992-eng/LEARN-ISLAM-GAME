@@ -24,7 +24,7 @@
     </div>
 
     <div class="controls-hint">
-      ހިނގުމަށް: (W, A, S, D) | ކެމެރާ 360° ބެލުމަށް: މައުސް ޑްރެގް ކުރައްވާ
+      ދުއްވުމަށް: (W, A, S, D) | ކެމެރާ 360° ބެލުމަށް: މައުސް ޑްރެގް ކުރައްވާ
     </div>
   </div>
 
@@ -69,7 +69,7 @@
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(renderer.domElement);
 
-    // Optimized Lighting (Reduces GPU Draw Calls)
+    // Optimized Lighting
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3d7026, 0.85);
     scene.add(hemiLight);
 
@@ -88,7 +88,7 @@
     scene.add(sunLight);
 
     // -------------------------------------------------------------
-    // 3. FAST REALISTIC GRASS TERRAIN (NO LAG)
+    // 3. FAST REALISTIC GRASS TERRAIN
     // -------------------------------------------------------------
     function createOptimizedGrassTexture() {
       const c = document.createElement('canvas');
@@ -127,43 +127,38 @@
     scene.add(fullGround);
 
     // -------------------------------------------------------------
-    // 4. LOAD ASSETS & ACCURATE LEG IDENTIFICATION
+    // 4. LOAD ASSETS (KID, GARDEN & SKATEBOARD)
     // -------------------------------------------------------------
     const loader = new THREE.GLTFLoader();
     
+    // Player Rig Root
     const playerRoot = new THREE.Group();
     scene.add(playerRoot);
     
     let kidInner = null;
+    let skateboardMesh = null;
     let mixer = null;
     let walkAction = null;
     let hasBuiltinAnim = false;
+    let boardDeckHeight = 0.22; // Height of skateboard deck above ground
     let baseFootOffset = 0;
 
-    // Bone references for realistic manual leg swings if no animation clip exists
-    let leftLegBone = null;
-    let rightLegBone = null;
-
-    // Load Garden Props - Lightweight controlled placement to prevent lag
+    // Load Garden Props
     loader.load('garden.glb', (gltf) => {
       const gardenOrigin = gltf.scene;
       gardenOrigin.traverse((n) => { 
-        if (n.isMesh) {
-          n.receiveShadow = true;
-        }
+        if (n.isMesh) n.receiveShadow = true;
       });
 
-      // Scatter a balanced number of decorative bushes around the terrain
       const clumpLocations = [
-        { x: 3, z: 4, s: 3.5 },
-        { x: -8, z: 10, s: 3.0 },
-        { x: 14, z: -8, s: 3.8 },
-        { x: -16, z: -14, s: 4.0 },
-        { x: 20, z: 18, s: 3.2 },
-        { x: -22, z: 6, s: 3.5 },
-        { x: 8, z: -20, s: 3.6 },
-        { x: -12, z: 24, s: 3.4 },
-        { x: 25, z: -15, s: 3.0 }
+        { x: 4, z: 5, s: 3.5 },
+        { x: -10, z: 12, s: 3.0 },
+        { x: 15, z: -10, s: 3.8 },
+        { x: -18, z: -16, s: 4.0 },
+        { x: 22, z: 20, s: 3.2 },
+        { x: -25, z: 8, s: 3.5 },
+        { x: 10, z: -22, s: 3.6 },
+        { x: -14, z: 26, s: 3.4 }
       ];
 
       clumpLocations.forEach((loc) => {
@@ -174,6 +169,45 @@
       });
     }, undefined, (e) => {
       console.log("Using procedural grass ground.");
+    });
+
+    // Load Skateboard
+    loader.load('skateboard.glb', (gltf) => {
+      skateboardMesh = gltf.scene;
+      skateboardMesh.updateMatrixWorld(true);
+
+      const sBox = new THREE.Box3().setFromObject(skateboardMesh);
+      const sSize = new THREE.Vector3();
+      sBox.getSize(sSize);
+
+      // Scale skateboard proportionately to the kid
+      const targetLength = 1.35;
+      const sScale = targetLength / (Math.max(sSize.x, sSize.z) || 1);
+      skateboardMesh.scale.set(sScale, sScale, sScale);
+
+      // Re-measure after scaling
+      skateboardMesh.updateMatrixWorld(true);
+      const scaledBox = new THREE.Box3().setFromObject(skateboardMesh);
+      
+      // Place wheels flat on the grass surface
+      skateboardMesh.position.y = -scaledBox.min.y;
+      boardDeckHeight = (scaledBox.max.y - scaledBox.min.y) * 0.85;
+
+      skateboardMesh.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+
+      playerRoot.add(skateboardMesh);
+
+      // If kid is already loaded, elevate her feet onto the deck
+      if (kidInner) {
+        kidInner.position.y = baseFootOffset + boardDeckHeight;
+      }
+    }, undefined, (err) => {
+      console.warn("skateboard.glb not found or still loading.");
     });
 
     // Load Kid Character
@@ -191,30 +225,22 @@
       kidInner.updateMatrixWorld(true);
       box = new THREE.Box3().setFromObject(kidInner);
 
-      // Lock bottom-most vertices precisely to Y = 0 (Feet never sink)
       baseFootOffset = -box.min.y;
-      kidInner.position.y = baseFootOffset;
+      // Position her feet directly on top of the skateboard deck
+      kidInner.position.y = baseFootOffset + boardDeckHeight;
+
+      // Rotate kid slightly sideways (skater riding stance)
+      kidInner.rotation.y = 0.25;
 
       kidInner.traverse((node) => {
         if (node.isMesh) {
           node.castShadow = true;
           node.receiveShadow = true;
         }
-        // Search for leg/thigh bones in model hierarchy
-        if (node.isBone) {
-          const name = node.name.toLowerCase();
-          if (name.includes('left') && (name.includes('leg') || name.includes('thigh') || name.includes('upleg'))) {
-            leftLegBone = node;
-          }
-          if (name.includes('right') && (name.includes('leg') || name.includes('thigh') || name.includes('upleg'))) {
-            rightLegBone = node;
-          }
-        }
       });
 
       playerRoot.add(kidInner);
 
-      // Check if model came with an existing animated walk cycle
       if (gltf.animations && gltf.animations.length > 0) {
         mixer = new THREE.AnimationMixer(kidInner);
         const clip = gltf.animations.find(a => 
@@ -234,9 +260,9 @@
     let prevMouseX = 0;
     let prevMouseY = 0;
 
-    let cameraAngleH = 0;     // Horizontal angle
-    let cameraAngleV = 0.32;  // Vertical pitch
-    let cameraDistance = 6.5; // Distance behind girl
+    let cameraAngleH = 0;
+    let cameraAngleV = 0.32;
+    let cameraDistance = 6.8;
 
     window.addEventListener('mousedown', (e) => {
       if (e.target.closest('#login-modal') || e.target.closest('.interactive')) return;
@@ -259,7 +285,6 @@
       cameraAngleV = Math.max(0.05, Math.min(Math.PI / 2.3, cameraAngleV));
     });
 
-    // Touchpad / touch screen support
     window.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1 && !e.target.closest('#login-modal')) {
         isDragging = true;
@@ -282,14 +307,13 @@
       cameraAngleV = Math.max(0.05, Math.min(Math.PI / 2.3, cameraAngleV));
     }, { passive: true });
 
-    // Zoom
     window.addEventListener('wheel', (e) => {
       cameraDistance += e.deltaY * 0.004;
-      cameraDistance = Math.max(3.5, Math.min(12.0, cameraDistance));
+      cameraDistance = Math.max(3.5, Math.min(13.0, cameraDistance));
     });
 
     // -------------------------------------------------------------
-    // 6. REALISTIC WALKING CONTROLS (NO HOPPING)
+    // 6. SKATEBOARD MOVEMENT & CARVING DYNAMICS
     // -------------------------------------------------------------
     const keys = {
       w: false, a: false, s: false, d: false,
@@ -305,8 +329,8 @@
     });
 
     const clock = new THREE.Clock();
-    const moveSpeed = 5.0; // Realistic walking pace
-    let walkStepTime = 0;
+    const skateSpeed = 8.5; // Fast, smooth skateboard glide
+    let currentTilt = 0;
 
     function animate() {
       requestAnimationFrame(animate);
@@ -335,50 +359,28 @@
           if (diff > Math.PI) diff -= Math.PI * 2;
           playerRoot.rotation.y += diff * 0.16;
 
-          playerRoot.position.x += Math.sin(targetRotation) * moveSpeed * delta;
-          playerRoot.position.z += Math.cos(targetRotation) * moveSpeed * delta;
+          // Skate carving banking angle
+          const targetTilt = -diff * 0.35;
+          currentTilt = THREE.MathUtils.lerp(currentTilt, targetTilt, 0.12);
+
+          playerRoot.position.x += Math.sin(targetRotation) * skateSpeed * delta;
+          playerRoot.position.z += Math.cos(targetRotation) * skateSpeed * delta;
+        } else {
+          currentTilt = THREE.MathUtils.lerp(currentTilt, 0, 0.15);
         }
 
-        // Lock root to ground
+        // Apply carving bank angle to board & rider
+        if (skateboardMesh) {
+          skateboardMesh.rotation.z = currentTilt;
+        }
+        kidInner.rotation.z = currentTilt * 0.8;
+
+        // Keep player root anchored to ground level
         playerRoot.position.y = 0;
 
-        // NATURAL WALKING MOVEMENT (NO RABBIT HOPPING)
-        if (hasBuiltinAnim && walkAction) {
-          if (isMoving) {
-            if (!walkAction.isRunning()) walkAction.play();
-          } else {
-            walkAction.stop();
-          }
-        } else {
-          // If the model has skeleton bones for legs, alternate forward/back leg swings
-          if (isMoving) {
-            walkStepTime += delta * 9.0;
-            const legSwing = Math.sin(walkStepTime) * 0.45;
-
-            if (leftLegBone && rightLegBone) {
-              leftLegBone.rotation.x = legSwing;
-              rightLegBone.rotation.x = -legSwing;
-            }
-
-            // Keep vertical position flat on the ground; subtle natural hip sway only
-            kidInner.position.y = baseFootOffset;
-            kidInner.rotation.z = Math.sin(walkStepTime) * 0.025;
-            kidInner.rotation.y = Math.sin(walkStepTime) * 0.02;
-          } else {
-            // Smooth reset when stationary
-            if (leftLegBone && rightLegBone) {
-              leftLegBone.rotation.x = THREE.MathUtils.lerp(leftLegBone.rotation.x, 0, 0.2);
-              rightLegBone.rotation.x = THREE.MathUtils.lerp(rightLegBone.rotation.x, 0, 0.2);
-            }
-            kidInner.position.y = baseFootOffset;
-            kidInner.rotation.z = THREE.MathUtils.lerp(kidInner.rotation.z, 0, 0.2);
-            kidInner.rotation.y = THREE.MathUtils.lerp(kidInner.rotation.y, 0, 0.2);
-          }
-        }
-
-        // 360° Smooth Orbit Camera follow
+        // 360° Orbit Camera follow
         const camX = playerRoot.position.x - Math.sin(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
-        const camY = playerRoot.position.y + Math.sin(cameraAngleV) * cameraDistance + 1.2;
+        const camY = playerRoot.position.y + Math.sin(cameraAngleV) * cameraDistance + 1.25;
         const camZ = playerRoot.position.z - Math.cos(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
 
         camera.position.set(camX, camY, camZ);
