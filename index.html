@@ -53,67 +53,81 @@
     }, 1000);
 
     // -------------------------------------------------------------
-    // 2. SCENE, SKY & LIGHTING
+    // 2. HIGH-PERFORMANCE 60 FPS RENDERER & SCENE SETUP
     // -------------------------------------------------------------
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x7fc7ea);
-    scene.fog = new THREE.FogExp2(0x7fc7ea, 0.005);
+    scene.background = new THREE.Color(0x82cbef);
+    scene.fog = new THREE.FogExp2(0x82cbef, 0.006);
 
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 800);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(renderer.domElement);
 
+    // Optimized Lighting (Reduces GPU Draw Calls)
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3d7026, 0.85);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfffaed, 1.4);
-    sunLight.position.set(40, 70, 30);
+    const sunLight = new THREE.DirectionalLight(0xfffaed, 1.3);
+    sunLight.position.set(30, 50, 20);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
     sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = 150;
-    sunLight.shadow.camera.left = -30;
-    sunLight.shadow.camera.right = 30;
-    sunLight.shadow.camera.top = 30;
-    sunLight.shadow.camera.bottom = -30;
+    sunLight.shadow.camera.far = 100;
+    sunLight.shadow.camera.left = -20;
+    sunLight.shadow.camera.right = 20;
+    sunLight.shadow.camera.top = 20;
+    sunLight.shadow.camera.bottom = -20;
+    sunLight.shadow.bias = -0.0005;
     scene.add(sunLight);
 
-    // Base Soil / Turf Bedding
-    function createSoilCanvas() {
+    // -------------------------------------------------------------
+    // 3. FAST REALISTIC GRASS TERRAIN (NO LAG)
+    // -------------------------------------------------------------
+    function createOptimizedGrassTexture() {
       const c = document.createElement('canvas');
-      c.width = 256;
-      c.height = 256;
+      c.width = 512;
+      c.height = 512;
       const ctx = c.getContext('2d');
-      ctx.fillStyle = '#2f521f';
-      ctx.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 15000; i++) {
-        ctx.fillStyle = ['#385f26', '#264219', '#467231'][Math.floor(Math.random() * 3)];
-        ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+
+      ctx.fillStyle = '#325e22';
+      ctx.fillRect(0, 0, 512, 512);
+
+      for (let i = 0; i < 20000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const h = 4 + Math.random() * 10;
+        ctx.strokeStyle = ['#437d2f', '#569b3d', '#6abf4b', '#2c531e'][Math.floor(Math.random() * 4)];
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (Math.random() - 0.5) * 3, y - h);
+        ctx.stroke();
       }
       return new THREE.CanvasTexture(c);
     }
 
-    const groundTex = createSoilCanvas();
-    groundTex.wrapS = THREE.RepeatWrapping;
-    groundTex.wrapT = THREE.RepeatWrapping;
-    groundTex.repeat.set(100, 100);
+    const grassTex = createOptimizedGrassTexture();
+    grassTex.wrapS = THREE.RepeatWrapping;
+    grassTex.wrapT = THREE.RepeatWrapping;
+    grassTex.repeat.set(60, 60);
 
-    const groundGeo = new THREE.PlaneGeometry(1000, 1000);
-    const groundMat = new THREE.MeshLambertMaterial({ map: groundTex });
+    const groundGeo = new THREE.PlaneGeometry(600, 600);
+    const groundMat = new THREE.MeshLambertMaterial({ map: grassTex });
     const fullGround = new THREE.Mesh(groundGeo, groundMat);
     fullGround.rotation.x = -Math.PI / 2;
-    fullGround.position.y = -0.05;
+    fullGround.position.y = 0;
     fullGround.receiveShadow = true;
     scene.add(fullGround);
 
     // -------------------------------------------------------------
-    // 3. LOAD ASSETS & FULL-AREA GRASS DISTRIBUTION
+    // 4. LOAD ASSETS & ACCURATE LEG IDENTIFICATION
     // -------------------------------------------------------------
     const loader = new THREE.GLTFLoader();
     
@@ -126,38 +140,43 @@
     let hasBuiltinAnim = false;
     let baseFootOffset = 0;
 
-    // Load and carpet the area with garden clumps
+    // Bone references for realistic manual leg swings if no animation clip exists
+    let leftLegBone = null;
+    let rightLegBone = null;
+
+    // Load Garden Props - Lightweight controlled placement to prevent lag
     loader.load('garden.glb', (gltf) => {
       const gardenOrigin = gltf.scene;
       gardenOrigin.traverse((n) => { 
         if (n.isMesh) {
-          n.receiveShadow = true; 
+          n.receiveShadow = true;
         }
       });
 
-      // Scatter grass clumps in a dense patterned field
-      const clumpSpacing = 7.5;
-      const range = 70; // creates a carpet covering 140x140 meters around origin
+      // Scatter a balanced number of decorative bushes around the terrain
+      const clumpLocations = [
+        { x: 3, z: 4, s: 3.5 },
+        { x: -8, z: 10, s: 3.0 },
+        { x: 14, z: -8, s: 3.8 },
+        { x: -16, z: -14, s: 4.0 },
+        { x: 20, z: 18, s: 3.2 },
+        { x: -22, z: 6, s: 3.5 },
+        { x: 8, z: -20, s: 3.6 },
+        { x: -12, z: 24, s: 3.4 },
+        { x: 25, z: -15, s: 3.0 }
+      ];
 
-      for (let x = -range; x <= range; x += clumpSpacing) {
-        for (let z = -range; z <= range; z += clumpSpacing) {
-          const clump = gardenOrigin.clone();
-          // Jitter position, scale, and rotation so it looks natural
-          const offsetX = x + (Math.random() - 0.5) * 3;
-          const offsetZ = z + (Math.random() - 0.5) * 3;
-          const scale = 3.6 + Math.random() * 1.4;
-
-          clump.position.set(offsetX, 0, offsetZ);
-          clump.rotation.y = Math.random() * Math.PI * 2;
-          clump.scale.set(scale, scale, scale);
-          scene.add(clump);
-        }
-      }
+      clumpLocations.forEach((loc) => {
+        const clump = gardenOrigin.clone();
+        clump.scale.set(loc.s, loc.s, loc.s);
+        clump.position.set(loc.x, 0, loc.z);
+        scene.add(clump);
+      });
     }, undefined, (e) => {
       console.log("Using procedural grass ground.");
     });
 
-    // Load Kid Character & Align to Ground
+    // Load Kid Character
     loader.load('kid.glb', (gltf) => {
       kidInner = gltf.scene;
       kidInner.updateMatrixWorld(true);
@@ -172,6 +191,7 @@
       kidInner.updateMatrixWorld(true);
       box = new THREE.Box3().setFromObject(kidInner);
 
+      // Lock bottom-most vertices precisely to Y = 0 (Feet never sink)
       baseFootOffset = -box.min.y;
       kidInner.position.y = baseFootOffset;
 
@@ -180,10 +200,21 @@
           node.castShadow = true;
           node.receiveShadow = true;
         }
+        // Search for leg/thigh bones in model hierarchy
+        if (node.isBone) {
+          const name = node.name.toLowerCase();
+          if (name.includes('left') && (name.includes('leg') || name.includes('thigh') || name.includes('upleg'))) {
+            leftLegBone = node;
+          }
+          if (name.includes('right') && (name.includes('leg') || name.includes('thigh') || name.includes('upleg'))) {
+            rightLegBone = node;
+          }
+        }
       });
 
       playerRoot.add(kidInner);
 
+      // Check if model came with an existing animated walk cycle
       if (gltf.animations && gltf.animations.length > 0) {
         mixer = new THREE.AnimationMixer(kidInner);
         const clip = gltf.animations.find(a => 
@@ -197,19 +228,17 @@
     });
 
     // -------------------------------------------------------------
-    // 4. 360° MOUSE & TOUCHPAD ORBIT CAMERA ENGINE
+    // 5. 360° MOUSE & TOUCHPAD CAMERA CONTROLS
     // -------------------------------------------------------------
     let isDragging = false;
     let prevMouseX = 0;
     let prevMouseY = 0;
 
-    // Camera spherical coordinates
-    let cameraAngleH = 0;     // Horizontal rotation (radians)
-    let cameraAngleV = 0.35;  // Vertical pitch (radians)
-    let cameraDistance = 7.0; // Distance behind player
+    let cameraAngleH = 0;     // Horizontal angle
+    let cameraAngleV = 0.32;  // Vertical pitch
+    let cameraDistance = 6.5; // Distance behind girl
 
     window.addEventListener('mousedown', (e) => {
-      // Don't drag if interacting with UI modals
       if (e.target.closest('#login-modal') || e.target.closest('.interactive')) return;
       isDragging = true;
       prevMouseX = e.clientX;
@@ -225,22 +254,19 @@
       prevMouseX = e.clientX;
       prevMouseY = e.clientY;
 
-      // Rotate camera around girl
-      cameraAngleH -= deltaX * 0.006;
-      cameraAngleV += deltaY * 0.005;
-
-      // Limit vertical pitch so camera cannot flip upside down
+      cameraAngleH -= deltaX * 0.0055;
+      cameraAngleV += deltaY * 0.0045;
       cameraAngleV = Math.max(0.05, Math.min(Math.PI / 2.3, cameraAngleV));
     });
 
-    // Touch controls for mobile / tablet trackpads
+    // Touchpad / touch screen support
     window.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1 && !e.target.closest('#login-modal')) {
         isDragging = true;
         prevMouseX = e.touches[0].clientX;
         prevMouseY = e.touches[0].clientY;
       }
-    });
+    }, { passive: true });
 
     window.addEventListener('touchend', () => { isDragging = false; });
 
@@ -251,19 +277,19 @@
       prevMouseX = e.touches[0].clientX;
       prevMouseY = e.touches[0].clientY;
 
-      cameraAngleH -= deltaX * 0.008;
-      cameraAngleV += deltaY * 0.006;
+      cameraAngleH -= deltaX * 0.007;
+      cameraAngleV += deltaY * 0.005;
       cameraAngleV = Math.max(0.05, Math.min(Math.PI / 2.3, cameraAngleV));
-    });
+    }, { passive: true });
 
-    // Zoom in / out with mouse wheel
+    // Zoom
     window.addEventListener('wheel', (e) => {
-      cameraDistance += e.deltaY * 0.005;
-      cameraDistance = Math.max(3.5, Math.min(14.0, cameraDistance));
+      cameraDistance += e.deltaY * 0.004;
+      cameraDistance = Math.max(3.5, Math.min(12.0, cameraDistance));
     });
 
     // -------------------------------------------------------------
-    // 5. MOVEMENT CONTROLS & CAMERA-RELATIVE WALKING
+    // 6. REALISTIC WALKING CONTROLS (NO HOPPING)
     // -------------------------------------------------------------
     const keys = {
       w: false, a: false, s: false, d: false,
@@ -279,7 +305,7 @@
     });
 
     const clock = new THREE.Clock();
-    const moveSpeed = 6.0;
+    const moveSpeed = 5.0; // Realistic walking pace
     let walkStepTime = 0;
 
     function animate() {
@@ -289,7 +315,6 @@
       if (mixer) mixer.update(delta);
 
       if (playerRoot && kidInner) {
-        // Calculate input movement direction relative to camera angle
         let moveX = 0;
         let moveZ = 0;
 
@@ -301,55 +326,69 @@
         const isMoving = (moveX !== 0 || moveZ !== 0);
 
         if (isMoving) {
-          // Compute angle of movement relative to camera
           const inputAngle = Math.atan2(moveX, moveZ);
           const targetRotation = cameraAngleH + inputAngle;
 
-          // Smoothly turn character toward walking direction
           const currentRotation = playerRoot.rotation.y;
           let diff = (targetRotation - currentRotation) % (Math.PI * 2);
           if (diff < -Math.PI) diff += Math.PI * 2;
           if (diff > Math.PI) diff -= Math.PI * 2;
-          playerRoot.rotation.y += diff * 0.15;
+          playerRoot.rotation.y += diff * 0.16;
 
-          // Move forward in the direction of the movement vector
           playerRoot.position.x += Math.sin(targetRotation) * moveSpeed * delta;
           playerRoot.position.z += Math.cos(targetRotation) * moveSpeed * delta;
         }
 
+        // Lock root to ground
         playerRoot.position.y = 0;
 
-        // Animations
+        // NATURAL WALKING MOVEMENT (NO RABBIT HOPPING)
         if (hasBuiltinAnim && walkAction) {
           if (isMoving) {
             if (!walkAction.isRunning()) walkAction.play();
           } else {
             walkAction.stop();
           }
-        } else if (!hasBuiltinAnim) {
+        } else {
+          // If the model has skeleton bones for legs, alternate forward/back leg swings
           if (isMoving) {
-            walkStepTime += delta * 11;
-            kidInner.position.y = baseFootOffset + Math.abs(Math.sin(walkStepTime)) * 0.12;
-            kidInner.rotation.z = Math.sin(walkStepTime * 0.5) * 0.05;
+            walkStepTime += delta * 9.0;
+            const legSwing = Math.sin(walkStepTime) * 0.45;
+
+            if (leftLegBone && rightLegBone) {
+              leftLegBone.rotation.x = legSwing;
+              rightLegBone.rotation.x = -legSwing;
+            }
+
+            // Keep vertical position flat on the ground; subtle natural hip sway only
+            kidInner.position.y = baseFootOffset;
+            kidInner.rotation.z = Math.sin(walkStepTime) * 0.025;
+            kidInner.rotation.y = Math.sin(walkStepTime) * 0.02;
           } else {
-            kidInner.position.y = THREE.MathUtils.lerp(kidInner.position.y, baseFootOffset, 0.15);
-            kidInner.rotation.z = THREE.MathUtils.lerp(kidInner.rotation.z, 0, 0.15);
+            // Smooth reset when stationary
+            if (leftLegBone && rightLegBone) {
+              leftLegBone.rotation.x = THREE.MathUtils.lerp(leftLegBone.rotation.x, 0, 0.2);
+              rightLegBone.rotation.x = THREE.MathUtils.lerp(rightLegBone.rotation.x, 0, 0.2);
+            }
+            kidInner.position.y = baseFootOffset;
+            kidInner.rotation.z = THREE.MathUtils.lerp(kidInner.rotation.z, 0, 0.2);
+            kidInner.rotation.y = THREE.MathUtils.lerp(kidInner.rotation.y, 0, 0.2);
           }
         }
 
-        // 360° Orbit Camera Position calculation
+        // 360° Smooth Orbit Camera follow
         const camX = playerRoot.position.x - Math.sin(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
         const camY = playerRoot.position.y + Math.sin(cameraAngleV) * cameraDistance + 1.2;
         const camZ = playerRoot.position.z - Math.cos(cameraAngleH) * Math.cos(cameraAngleV) * cameraDistance;
 
         camera.position.set(camX, camY, camZ);
-        camera.lookAt(playerRoot.position.x, playerRoot.position.y + 1.3, playerRoot.position.z);
+        camera.lookAt(playerRoot.position.x, playerRoot.position.y + 1.25, playerRoot.position.z);
 
-        // Keep sunlight and shadow area centered with character
+        // Sunlight tracks player
         sunLight.position.set(
-          playerRoot.position.x + 35,
-          70,
-          playerRoot.position.z + 25
+          playerRoot.position.x + 30,
+          50,
+          playerRoot.position.z + 20
         );
         sunLight.target = playerRoot;
       }
@@ -366,7 +405,7 @@
     });
 
     // -------------------------------------------------------------
-    // 6. LOGIN / AUTHENTICATION MODAL
+    // 7. LOGIN / AUTHENTICATION MODAL
     // -------------------------------------------------------------
     document.getElementById('guest-btn').addEventListener('click', () => {
       document.getElementById('login-modal').classList.add('hidden');
