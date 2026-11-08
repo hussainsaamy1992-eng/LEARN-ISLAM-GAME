@@ -53,12 +53,12 @@
     }, 1000);
 
     // -------------------------------------------------------------
-    // 2. SCENE, ATMOSPHERE & LIGHTING
+    // 2. SCENE, SKY & LIGHTING
     // -------------------------------------------------------------
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB); // Realistic Sky Blue
-    scene.fog = new THREE.FogExp2(0x87CEEB, 0.007);
+    scene.background = new THREE.Color(0x7fc7ea);
+    scene.fog = new THREE.FogExp2(0x7fc7ea, 0.005);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -68,100 +68,151 @@
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.appendChild(renderer.domElement);
 
-    // Ambient & Sunlight
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x446633, 0.85);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3d7026, 0.85);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfffaed, 1.3);
-    sunLight.position.set(30, 60, 20);
+    const sunLight = new THREE.DirectionalLight(0xfffaed, 1.4);
+    sunLight.position.set(40, 70, 30);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = 200;
-    sunLight.shadow.camera.left = -30;
-    sunLight.shadow.camera.right = 30;
-    sunLight.shadow.camera.top = 30;
-    sunLight.shadow.camera.bottom = -30;
+    sunLight.shadow.camera.far = 150;
+    sunLight.shadow.camera.left = -25;
+    sunLight.shadow.camera.right = 25;
+    sunLight.shadow.camera.top = 25;
+    sunLight.shadow.camera.bottom = -25;
     scene.add(sunLight);
 
     // -------------------------------------------------------------
-    // 3. LARGE EXPANSIVE GROUND
+    // 3. PROCEDURAL REALISTIC GRASS TEXTURE & VAST GROUND
     // -------------------------------------------------------------
-    const groundGeo = new THREE.PlaneGeometry(600, 600);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x5a9e32 });
-    const mainGround = new THREE.Mesh(groundGeo, groundMat);
-    mainGround.rotation.x = -Math.PI / 2;
-    mainGround.position.y = 0;
-    mainGround.receiveShadow = true;
-    scene.add(mainGround);
+    function createGrassCanvas() {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 512;
+      const ctx = c.getContext('2d');
+
+      // Base soil/dark green
+      ctx.fillStyle = '#396b27';
+      ctx.fillRect(0, 0, 512, 512);
+
+      // Procedural grass blade noise
+      for (let i = 0; i < 40000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const len = 3 + Math.random() * 8;
+        const greens = ['#49852f', '#5ca33a', '#6dbd45', '#336122', '#7ecb4f'];
+        ctx.strokeStyle = greens[Math.floor(Math.random() * greens.length)];
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (Math.random() - 0.5) * 4, y - len);
+        ctx.stroke();
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    const grassTex = createGrassCanvas();
+    grassTex.wrapS = THREE.RepeatWrapping;
+    grassTex.wrapT = THREE.RepeatWrapping;
+    grassTex.repeat.set(80, 80);
+
+    const groundGeo = new THREE.PlaneGeometry(800, 800);
+    const groundMat = new THREE.MeshLambertMaterial({ map: grassTex });
+    const fullGround = new THREE.Mesh(groundGeo, groundMat);
+    fullGround.rotation.x = -Math.PI / 2;
+    fullGround.position.y = 0;
+    fullGround.receiveShadow = true;
+    scene.add(fullGround);
 
     // -------------------------------------------------------------
-    // 4. LOAD 3D ASSETS (garden.glb & kid.glb)
+    // 4. LOAD ASSETS (FIX WAIST SINKING ISSUE)
     // -------------------------------------------------------------
     const loader = new THREE.GLTFLoader();
     
-    // Player Character Rig Root
+    // Character root handles world positioning & rotation
     const playerRoot = new THREE.Group();
     scene.add(playerRoot);
     
-    let kidInnerModel = null;
+    let kidInner = null;
     let mixer = null;
     let walkAction = null;
     let hasBuiltinAnim = false;
+    let baseFootOffset = 0;
 
-    // Load Garden Props / Ground Patch
+    // Load Garden Props & Scatter Several Clumps
     loader.load('garden.glb', (gltf) => {
-      const garden = gltf.scene;
-      garden.scale.set(6, 6, 6);
-      garden.position.set(0, 0, 0);
+      const gardenOrigin = gltf.scene;
+      gardenOrigin.traverse((n) => { if (n.isMesh) n.receiveShadow = true; });
 
-      garden.traverse((node) => {
-        if (node.isMesh) {
-          node.receiveShadow = true;
-        }
+      // Place a few natural clumps around the landscape
+      const positions = [
+        { x: 0, z: 0, s: 4 },
+        { x: -18, z: 12, s: 3.5 },
+        { x: 22, z: -10, s: 3.8 },
+        { x: -12, z: -25, s: 4.2 },
+        { x: 20, z: 22, s: 3.2 }
+      ];
+
+      positions.forEach((p, idx) => {
+        const clump = (idx === 0) ? gardenOrigin : gardenOrigin.clone();
+        clump.scale.set(p.s, p.s, p.s);
+        clump.position.set(p.x, 0, p.z);
+        scene.add(clump);
       });
-      scene.add(garden);
-    }, undefined, (err) => {
-      console.log("No external garden.glb mesh loaded, running procedural terrain.");
+    }, undefined, (e) => {
+      console.log("No garden.glb found; relying on procedural grass terrain.");
     });
 
-    // Load Girl Character & Align to Ground
+    // Load Kid Character
     loader.load('kid.glb', (gltf) => {
-      kidInnerModel = gltf.scene;
+      kidInner = gltf.scene;
 
-      // 1. Calculate bounding box to place feet exactly on ground level (Y = 0)
-      const bbox = new THREE.Box3().setFromObject(kidInnerModel);
-      const height = bbox.max.y - bbox.min.y;
+      // Ensure all transforms and matrices update before measuring
+      kidInner.updateMatrixWorld(true);
 
-      // Standardize size to 2 units tall
-      const scaleFactor = 2.0 / (height || 1);
-      kidInnerModel.scale.set(scaleFactor, scaleFactor, scaleFactor);
+      // Measure original bounding box
+      let box = new THREE.Box3().setFromObject(kidInner);
+      let origHeight = box.max.y - box.min.y;
 
-      // Re-calculate bounding box after scaling and shift base to 0
-      const updatedBox = new THREE.Box3().setFromObject(kidInnerModel);
-      kidInnerModel.position.y = -updatedBox.min.y;
+      // Scale character to standard human child height (~2.2 units)
+      const targetHeight = 2.2;
+      const scaleFactor = targetHeight / (origHeight || 1);
+      kidInner.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
-      kidInnerModel.traverse((node) => {
+      // Recalculate bounding box with new scale
+      kidInner.updateMatrixWorld(true);
+      box = new THREE.Box3().setFromObject(kidInner);
+
+      // Force the lowest vertex of the feet to rest exactly at Y = 0
+      baseFootOffset = -box.min.y;
+      kidInner.position.y = baseFootOffset;
+
+      kidInner.traverse((node) => {
         if (node.isMesh) {
           node.castShadow = true;
           node.receiveShadow = true;
         }
       });
 
-      playerRoot.add(kidInnerModel);
+      playerRoot.add(kidInner);
 
-      // 2. Check for skeletal walking animations inside the model
+      // Check for built-in skeletal animations
       if (gltf.animations && gltf.animations.length > 0) {
-        mixer = new THREE.AnimationMixer(kidInnerModel);
-        const clip = gltf.animations.find(a => a.name.toLowerCase().includes('walk') || a.name.toLowerCase().includes('run')) || gltf.animations[0];
+        mixer = new THREE.AnimationMixer(kidInner);
+        const clip = gltf.animations.find(a => 
+          a.name.toLowerCase().includes('walk') || 
+          a.name.toLowerCase().includes('run')
+        ) || gltf.animations[0];
+
         walkAction = mixer.clipAction(clip);
         hasBuiltinAnim = true;
       }
     });
 
     // -------------------------------------------------------------
-    // 5. MOVEMENT, KEYBOARD INPUT & PROCEDURAL ANIMATION
+    // 5. MOVEMENT, KEYBOARD CONTROLS & CAMERA
     // -------------------------------------------------------------
     const keys = {
       w: false, a: false, s: false, d: false,
@@ -177,9 +228,9 @@
     });
 
     const clock = new THREE.Clock();
-    const moveSpeed = 6.0;   // units/second
-    const turnSpeed = 3.5;   // radians/second
-    let walkCycle = 0;
+    const moveSpeed = 5.5;   // walking units/sec
+    const turnSpeed = 3.2;   // radians/sec
+    let walkStepTime = 0;
 
     function animate() {
       requestAnimationFrame(animate);
@@ -187,10 +238,10 @@
 
       if (mixer) mixer.update(delta);
 
-      if (playerRoot && kidInnerModel) {
+      if (playerRoot && kidInner) {
         let isMoving = false;
 
-        // Turn character left / right
+        // Turning
         if (keys.a || keys.ArrowLeft) {
           playerRoot.rotation.y += turnSpeed * delta;
         }
@@ -198,20 +249,20 @@
           playerRoot.rotation.y -= turnSpeed * delta;
         }
 
-        // Move character forward / backward
+        // Forward / Backward
         if (keys.w || keys.ArrowUp) {
           playerRoot.translateZ(moveSpeed * delta);
           isMoving = true;
         }
         if (keys.s || keys.ArrowDown) {
-          playerRoot.translateZ(-moveSpeed * 0.5 * delta);
+          playerRoot.translateZ(-moveSpeed * 0.55 * delta);
           isMoving = true;
         }
 
-        // Lock root position strictly to ground plane
+        // Keep player root anchored to ground plane
         playerRoot.position.y = 0;
 
-        // Walking Animation Pipeline
+        // Walking Gait Dynamics
         if (hasBuiltinAnim && walkAction) {
           if (isMoving) {
             if (!walkAction.isRunning()) walkAction.play();
@@ -219,32 +270,33 @@
             walkAction.stop();
           }
         } else if (!hasBuiltinAnim) {
-          // Realistic procedural walking gait: vertical bounce and weight shift
+          // Realistic step bobbing that always returns to base foot level
           if (isMoving) {
-            walkCycle += delta * 12;
-            kidInnerModel.position.y = (-new THREE.Box3().setFromObject(kidInnerModel).min.y) + Math.abs(Math.sin(walkCycle)) * 0.12;
-            kidInnerModel.rotation.z = Math.sin(walkCycle * 0.5) * 0.05;
+            walkStepTime += delta * 11;
+            kidInner.position.y = baseFootOffset + Math.abs(Math.sin(walkStepTime)) * 0.12;
+            kidInner.rotation.z = Math.sin(walkStepTime * 0.5) * 0.05;
           } else {
-            kidInnerModel.rotation.z = THREE.MathUtils.lerp(kidInnerModel.rotation.z, 0, 0.1);
+            kidInner.position.y = THREE.MathUtils.lerp(kidInner.position.y, baseFootOffset, 0.15);
+            kidInner.rotation.z = THREE.MathUtils.lerp(kidInner.rotation.z, 0, 0.15);
           }
         }
 
-        // Smooth camera follow system behind the character
-        const cameraOffset = new THREE.Vector3(0, 3.2, -6.5);
+        // Smooth camera follow
+        const cameraOffset = new THREE.Vector3(0, 3.2, -6.0);
         cameraOffset.applyMatrix4(playerRoot.matrixWorld);
         camera.position.lerp(cameraOffset, 0.08);
 
         camera.lookAt(
           playerRoot.position.x,
-          playerRoot.position.y + 1.4,
+          playerRoot.position.y + 1.3,
           playerRoot.position.z
         );
 
-        // Keep shadows sharp around player position
+        // Position sunlight above player for clean shadow projection
         sunLight.position.set(
-          playerRoot.position.x + 30,
-          60,
-          playerRoot.position.z + 20
+          playerRoot.position.x + 35,
+          70,
+          playerRoot.position.z + 25
         );
         sunLight.target = playerRoot;
       }
@@ -261,7 +313,7 @@
     });
 
     // -------------------------------------------------------------
-    // 6. LOGIN & APPS SCRIPT API INTEGRATION
+    // 6. LOGIN / AUTHENTICATION MODAL
     // -------------------------------------------------------------
     document.getElementById('guest-btn').addEventListener('click', () => {
       document.getElementById('login-modal').classList.add('hidden');
